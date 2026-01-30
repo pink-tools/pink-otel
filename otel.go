@@ -16,6 +16,13 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
+// Attr is an ordered key-value pair for log attributes.
+// Using a slice of Attr instead of map[string]any preserves insertion order.
+type Attr struct {
+	K string
+	V any
+}
+
 var (
 	serviceName      string
 	serviceVersion   string
@@ -24,135 +31,46 @@ var (
 )
 
 var marshaler = protojson.MarshalOptions{EmitUnpopulated: false}
+var unmarshaler = protojson.UnmarshalOptions{DiscardUnknown: true}
 
 func Init(name, version string) {
 	serviceName = name
 	serviceVersion = version
 
-	// Service name width for pretty output alignment
-	// Set by orchestrator based on registry, fallback to service name length
 	serviceNameWidth = len(name)
 	if w, err := strconv.Atoi(os.Getenv("PINK_LOG_WIDTH")); err == nil && w > 0 {
 		serviceNameWidth = w
 	}
 
-	// Check LOG_FORMAT env var first (explicit override)
 	switch strings.ToLower(os.Getenv("LOG_FORMAT")) {
 	case "json":
 		prettyMode = false
 	case "pretty":
 		prettyMode = true
 	default:
-		// Auto-detect: pretty if TTY, JSON otherwise
 		prettyMode = term.IsTerminal(int(os.Stdout.Fd()))
 	}
 }
 
-func toAnyValue(v any) *commonv1.AnyValue {
-	switch val := v.(type) {
-	case string:
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: val}}
-	case bool:
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_BoolValue{BoolValue: val}}
-	case int:
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: int64(val)}}
-	case int8:
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: int64(val)}}
-	case int16:
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: int64(val)}}
-	case int32:
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: int64(val)}}
-	case int64:
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: val}}
-	case uint:
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: int64(val)}}
-	case uint8:
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: int64(val)}}
-	case uint16:
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: int64(val)}}
-	case uint32:
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: int64(val)}}
-	case uint64:
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: int64(val)}}
-	case float32:
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_DoubleValue{DoubleValue: float64(val)}}
-	case float64:
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_DoubleValue{DoubleValue: val}}
-	case []byte:
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_BytesValue{BytesValue: val}}
-	case []any:
-		values := make([]*commonv1.AnyValue, len(val))
-		for i, item := range val {
-			values[i] = toAnyValue(item)
-		}
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_ArrayValue{ArrayValue: &commonv1.ArrayValue{Values: values}}}
-	case []string:
-		values := make([]*commonv1.AnyValue, len(val))
-		for i, item := range val {
-			values[i] = toAnyValue(item)
-		}
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_ArrayValue{ArrayValue: &commonv1.ArrayValue{Values: values}}}
-	case []int:
-		values := make([]*commonv1.AnyValue, len(val))
-		for i, item := range val {
-			values[i] = toAnyValue(item)
-		}
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_ArrayValue{ArrayValue: &commonv1.ArrayValue{Values: values}}}
-	case map[string]any:
-		kvs := make([]*commonv1.KeyValue, 0, len(val))
-		for k, v := range val {
-			kvs = append(kvs, &commonv1.KeyValue{Key: k, Value: toAnyValue(v)})
-		}
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_KvlistValue{KvlistValue: &commonv1.KeyValueList{Values: kvs}}}
-	default:
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: fmt.Sprintf("%v", v)}}
+func SetServiceNameWidth(w int) {
+	if w > 0 {
+		serviceNameWidth = w
 	}
 }
 
-func formatValue(v any) string {
-	s := fmt.Sprintf("%v", v)
-	if strings.ContainsAny(s, " =\"") {
-		return fmt.Sprintf("%q", s)
-	}
-	return s
-}
-
-func emitPretty(severityText string, body string, attrs map[string]any) {
-	now := time.Now().Format("15:04:05")
-
-	// Extract source attribute for special formatting
-	source := serviceName
-	if s, ok := attrs["source"]; ok {
-		source = fmt.Sprintf("%v", s)
-		delete(attrs, "source")
-	}
-
-	// Build remaining attributes string (logfmt style)
-	var attrsStr string
-	if len(attrs) > 0 {
-		var parts []string
-		for k, v := range attrs {
-			parts = append(parts, fmt.Sprintf("%s=%s", k, formatValue(v)))
-		}
-		attrsStr = " [" + strings.Join(parts, ", ") + "]"
-	}
-
-	fmt.Fprintf(os.Stdout, "%s [%-*s] %-5s %s%s\n", now, serviceNameWidth, source, severityText, body, attrsStr)
-}
-
-func emit(ctx context.Context, severityNumber logsv1.SeverityNumber, severityText string, body string, attrs map[string]any) {
+func emit(ctx context.Context, severityNumber logsv1.SeverityNumber, severityText string, body string, attrs []Attr) {
 	if prettyMode {
-		emitPretty(severityText, body, attrs)
+		emitPretty(ctx, severityText, body, attrs)
 		return
 	}
 
 	now := uint64(time.Now().UnixNano())
 
 	var kvAttrs []*commonv1.KeyValue
-	for k, v := range attrs {
+	for _, attr := range attrs {
 		kvAttrs = append(kvAttrs, &commonv1.KeyValue{
-			Key:   k,
-			Value: toAnyValue(v),
+			Key:   attr.K,
+			Value: toAnyValue(attr.V),
 		})
 	}
 
@@ -194,39 +112,27 @@ func emit(ctx context.Context, severityNumber logsv1.SeverityNumber, severityTex
 		}},
 	}
 
-	jsonBytes, _ := marshaler.Marshal(data)
+	jsonBytes, err := marshaler.Marshal(data)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "otel: marshal error: %v\n", err)
+		return
+	}
 	os.Stdout.Write(jsonBytes)
 	os.Stdout.Write([]byte("\n"))
 }
 
-func Debug(ctx context.Context, body string, attrs ...map[string]any) {
-	var a map[string]any
-	if len(attrs) > 0 {
-		a = attrs[0]
-	}
-	emit(ctx, logsv1.SeverityNumber_SEVERITY_NUMBER_DEBUG, "DEBUG", body, a)
+func Debug(ctx context.Context, body string, attrs ...Attr) {
+	emit(ctx, logsv1.SeverityNumber_SEVERITY_NUMBER_DEBUG, "DEBUG", body, attrs)
 }
 
-func Info(ctx context.Context, body string, attrs ...map[string]any) {
-	var a map[string]any
-	if len(attrs) > 0 {
-		a = attrs[0]
-	}
-	emit(ctx, logsv1.SeverityNumber_SEVERITY_NUMBER_INFO, "INFO", body, a)
+func Info(ctx context.Context, body string, attrs ...Attr) {
+	emit(ctx, logsv1.SeverityNumber_SEVERITY_NUMBER_INFO, "INFO", body, attrs)
 }
 
-func Warn(ctx context.Context, body string, attrs ...map[string]any) {
-	var a map[string]any
-	if len(attrs) > 0 {
-		a = attrs[0]
-	}
-	emit(ctx, logsv1.SeverityNumber_SEVERITY_NUMBER_WARN, "WARN", body, a)
+func Warn(ctx context.Context, body string, attrs ...Attr) {
+	emit(ctx, logsv1.SeverityNumber_SEVERITY_NUMBER_WARN, "WARN", body, attrs)
 }
 
-func Error(ctx context.Context, body string, attrs ...map[string]any) {
-	var a map[string]any
-	if len(attrs) > 0 {
-		a = attrs[0]
-	}
-	emit(ctx, logsv1.SeverityNumber_SEVERITY_NUMBER_ERROR, "ERROR", body, a)
+func Error(ctx context.Context, body string, attrs ...Attr) {
+	emit(ctx, logsv1.SeverityNumber_SEVERITY_NUMBER_ERROR, "ERROR", body, attrs)
 }
