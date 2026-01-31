@@ -3,6 +3,7 @@ package otel
 import (
 	"fmt"
 	"reflect"
+	"strings"
 
 	commonv1 "go.opentelemetry.io/proto/otlp/common/v1"
 )
@@ -18,7 +19,7 @@ func sliceToArrayValue(v reflect.Value) *commonv1.AnyValue {
 func toAnyValue(v any) *commonv1.AnyValue {
 	switch val := v.(type) {
 	case string:
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: val}}
+		return &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: strings.ToValidUTF8(val, "")}}
 	case bool:
 		return &commonv1.AnyValue{Value: &commonv1.AnyValue_BoolValue{BoolValue: val}}
 	case int:
@@ -58,7 +59,7 @@ func toAnyValue(v any) *commonv1.AnyValue {
 		if rv.Kind() == reflect.Slice {
 			return sliceToArrayValue(rv)
 		}
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: fmt.Sprintf("%v", v)}}
+		return &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: strings.ToValidUTF8(fmt.Sprintf("%v", v), "")}}
 	}
 }
 

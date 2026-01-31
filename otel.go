@@ -69,7 +69,7 @@ func emit(ctx context.Context, severityNumber logsv1.SeverityNumber, severityTex
 	var kvAttrs []*commonv1.KeyValue
 	for _, attr := range attrs {
 		kvAttrs = append(kvAttrs, &commonv1.KeyValue{
-			Key:   attr.K,
+			Key:   strings.ToValidUTF8(attr.K, ""),
 			Value: toAnyValue(attr.V),
 		})
 	}
@@ -79,7 +79,7 @@ func emit(ctx context.Context, severityNumber logsv1.SeverityNumber, severityTex
 		ObservedTimeUnixNano: now,
 		SeverityNumber:       severityNumber,
 		SeverityText:         severityText,
-		Body:                 &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: body}},
+		Body:                 &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: strings.ToValidUTF8(body, "")}},
 		Attributes:           kvAttrs,
 	}
 
