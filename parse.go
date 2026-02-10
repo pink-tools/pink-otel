@@ -9,6 +9,26 @@ import (
 	"golang.org/x/term"
 )
 
+// ParseLogMessage extracts the message body from an OTLP JSON log line.
+// Returns the original line if parsing fails.
+func ParseLogMessage(line string) string {
+	var data logsv1.LogsData
+	if err := unmarshaler.Unmarshal([]byte(line), &data); err != nil {
+		return line
+	}
+	if len(data.ResourceLogs) == 0 || len(data.ResourceLogs[0].ScopeLogs) == 0 {
+		return line
+	}
+	for _, scopeLog := range data.ResourceLogs[0].ScopeLogs {
+		for _, record := range scopeLog.LogRecords {
+			if msg := record.Body.GetStringValue(); msg != "" {
+				return msg
+			}
+		}
+	}
+	return line
+}
+
 // PrintServiceLog parses OTLP JSON and prints pretty output if in TTY.
 // If not in TTY or not valid OTLP JSON, prints line as-is.
 func PrintServiceLog(line string) {
