@@ -3,10 +3,8 @@ package otel
 import (
 	"encoding/hex"
 	"fmt"
-	"os"
 
 	logsv1 "go.opentelemetry.io/proto/otlp/logs/v1"
-	"golang.org/x/term"
 )
 
 // ParseLogMessage extracts the message body from an OTLP JSON log line.
@@ -29,10 +27,11 @@ func ParseLogMessage(line string) string {
 	return line
 }
 
-// PrintServiceLog parses OTLP JSON and prints pretty output if in TTY.
-// If not in TTY or not valid OTLP JSON, prints line as-is.
+// PrintServiceLog parses OTLP JSON and prints pretty output.
+// Uses the same prettyMode as the rest of the logging system.
+// If not in pretty mode or not valid OTLP JSON, prints line as-is.
 func PrintServiceLog(line string) {
-	if !term.IsTerminal(int(os.Stdout.Fd())) {
+	if !prettyMode {
 		fmt.Println(line)
 		return
 	}
