@@ -1,6 +1,6 @@
 # pink-otel
 
-Structured logging for Go following [OTLP Logs](https://opentelemetry.io/docs/specs/otlp/#otlpgrpc-protocol) specification. Used in all [pink-tools](https://github.com/pink-tools) services.
+Structured logging for Go following [OTLP Logs](https://opentelemetry.io/docs/specs/otlp/) specification. Used in all [pink-tools](https://github.com/pink-tools) services.
 
 Output format: [LogsData](https://github.com/open-telemetry/opentelemetry-proto/blob/main/opentelemetry/proto/logs/v1/logs.proto) protobuf serialized to JSON.
 
@@ -24,38 +24,31 @@ func main() {
     otel.Init("my-service", "1.0.0")
 
     ctx := context.Background()
-    otel.Info(ctx, "server started")
-    otel.Error(ctx, "request failed", map[string]any{
-        "status":  500,
-        "path":    "/api/users",
-        "user_id": 12345,
-    })
+    otel.Info(ctx, "server started", otel.Attr{K: "port", V: 8080})
+    otel.Error(ctx, "request failed",
+        otel.Attr{K: "status", V: 500},
+        otel.Attr{K: "path", V: "/api/users"},
+    )
 }
 ```
 
 ## Output
 
-Checks if stdout is a terminal (`isatty`):
+Auto-detects terminal vs file/pipe:
 
-| Running | stdout | Format |
-|---------|--------|--------|
-| `./myapp` in terminal | terminal | pretty |
-| `./myapp > app.log` | file | JSON |
-| `./myapp \| jq` | pipe | JSON |
-| Docker container | not a terminal | JSON |
-| systemd service | journal | JSON |
-| AWS CloudWatch | not a terminal | JSON |
+| Running | Format |
+|---------|--------|
+| `./myapp` in terminal | pretty |
+| `./myapp > app.log` | JSON |
+| `./myapp \| jq` | JSON |
+| Docker / systemd | JSON |
 
-Environment variable override:
-```bash
-LOG_FORMAT=json ./myapp   # force JSON in terminal
-LOG_FORMAT=pretty ./myapp # force pretty in Docker
-```
+Override: `LOG_FORMAT=json` or `LOG_FORMAT=pretty`.
 
 **Pretty (terminal):**
 ```
-15:04:05 [my-service] INFO  server started
-15:04:05 [my-service] ERROR request failed [status=500, path=/api/users, user_id=12345]
+15:04:05 [my-service] INFO  server started [port=8080]
+15:04:05 [my-service] ERROR request failed [status=500, path=/api/users]
 ```
 
 **JSON (file/pipe):**
@@ -70,15 +63,11 @@ LOG_FORMAT=pretty ./myapp # force pretty in Docker
     },
     "scopeLogs": [{
       "logRecords": [{
-        "timeUnixNano": 1706234567000000000,
-        "severityNumber": 17,
         "severityText": "ERROR",
         "body": {"stringValue": "request failed"},
         "attributes": [
           {"key": "status", "value": {"intValue": "500"}}
-        ],
-        "traceId": "...",
-        "spanId": "..."
+        ]
       }]
     }]
   }]
@@ -91,10 +80,17 @@ TraceID/SpanID included when context contains OpenTelemetry span.
 
 ```go
 func Init(name, version string)
-func Debug(ctx context.Context, body string, attrs ...map[string]any)
-func Info(ctx context.Context, body string, attrs ...map[string]any)
-func Warn(ctx context.Context, body string, attrs ...map[string]any)
-func Error(ctx context.Context, body string, attrs ...map[string]any)
+func Debug(ctx context.Context, body string, attrs ...Attr)
+func Info(ctx context.Context, body string, attrs ...Attr)
+func Warn(ctx context.Context, body string, attrs ...Attr)
+func Error(ctx context.Context, body string, attrs ...Attr)
+
+// Ordered key-value attribute
+type Attr struct { K string; V any }
+
+// Log parsing (for service log forwarding)
+func ParseLogMessage(line []byte) string
+func PrintServiceLog(line []byte)
 ```
 
 ## Attribute Types
